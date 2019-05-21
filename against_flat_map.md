@@ -1,163 +1,124 @@
 ---
-title: "`visit<R>`: Explicit Return Type for `visit`"
-document: P0655R0
-date: 2017-10-14
-audience: Library Evolution Group
+title: "Issues with current `flat_map` proposal"
+document:
+date: 2019-05-20
+audience: Library Working Group
 author:
-  - name: Michael Park
-    email: <mcypark@gmail.com>
-  - name: Agustín Bergé
-    email: <agustinberge@gmail.com>
-toc: false
+  - name: Denis Yaroshevskiy
+    email: <denis.yaroshevskij@gmail.com>
+toc: true
 ---
+
+# Revision history
+
+Revision 0
+Original revision of the paper for 2019 Cologne meeting.
 
 # Introduction
 
-This paper proposes to allow visiting `variant`s with an explicitly specified
-return type.
+[@P0429] introduces `flat_map` into the standard as a container adaptor based on two containers which requires that reference type to be a proxy object. This has been attempted on multiple occasions for other use-cases such as an infamous `vector<bool>` [@VECTOR_BOOL], multi-span (decided against it) [@P0009], standard audio proposal [@P1386] (also decided against it following multi-span) and others. The goal of this paper is to object to inclusion of `flat_map` with same flawed design into the standard at least until the point that zip is standardized.
 
-# Motivation and Scope
+# Listing of examples of how current design is problematic
 
-Variant visitation requires invocation of all combinations of alternatives to
-result in the same type, such type is deduced as the visitation return type.
-It is sometimes desirable to explicitly specify a return type to which all
-the invocations are implicitly convertible to, as if by _`INVOKE`_`<R>` rather
-than _`INVOKE`_:
+In the flat_map paper reference type is defined as `pair<const key_type&, value_type&>`. This breaks many expectations and typical patterns for writing C++ code.
+(In all of the examples `decltype(it)` is `flat_map::iterator`).
 
 ```cpp
-struct process {
-  template <typename I>
-  auto operator()(I i) -> O<I> { /* ... */ };
-};
+//--------------------
+auto x = std::move(*it);  // `x` is moved from `*it`. Unless it's a `flat_map` where
+                          // this creates a reference. Copy does not work either.
 
-std::variant<I1, I2> input = /* ... */;
+//--------------------
+auto& x = *it;  // Create a mutable reference to the value pointed by it. Except for flat_map where this
+                // does not compile.
 
-// mapping from a `variant` of inputs to a `variant` of results:
-auto output = std::visit<std::variant<O<I1>, O<I2>>>(process{}, input);
+//--------------------
+[x = *it] { do_smth(x); }  // Capture an element by value. Unless flat_map,
+                           // in which case capture is by reference.
 
-// coercing different results to a common type:
-auto result = std::visit<std::common_type_t<O<I1>, O<I2>>>(process{}, input);
+//--------------------
+auto foo() {             // This does not dangle unless used with flat_map’s iterators.
+   // ...
+   return *it;
+}
 
-// visiting a `variant` for the side-effects, discarding results:
-std::visit<void>(process{}, input);
+//--------------------
+template <typename T>
+void bar(T mine) {        // bar does not modify input parameters. Unless called with flat_map reference.
+  sink(std::move(mine));
+}
 ```
 
-In all of the above cases the return type deduction would have failed, as each
-invocation yields a different type for each alternative.
+# Lack of reference implementations
 
-# Impact on the Standard
+There is no production (or even a complete reference) implementation for `flat_map` that is based on two containers that the author could find.
+All popular open source implementations (boost, folly, eastl, chromium) use a single container.
+The only library that we are aware of that could provide a similar experience to using two containers flat map is `zip` utility from ranges-v3.
+`zip` was not yet accepted for standardisation.
 
-This proposal is a pure library extension.
+# Lack of `zip` limits the usage of `flat_map`
 
-# Proposed Wording
+* erase_remove_if idiom is not implementable since there is no zip in the standard. Also current version does not have mutating access to keys/values which also disallows this.
+* One of the most typical use-cases for flat_map is building a buffer and then converting it into a map. Without standard zip we cannot use algorithms to populate such buffers.
 
-Modify __§23.7.2 [variant.syn]__ of [@N4687] as indicated:
+These are very important use-cases and current proposal does not address them.
 
-```diff
-  // 23.7.7, visitation
-  template <class Visitor, class... Variants>
-    constexpr @_see below_@ visit(Visitor&&, Variants&&...);
-+  template <class R, class Visitor, class... Variants>
-+    constexpr R visit(Visitor&&, Variants&&...);
-```
+# Performance implications of two containers on sort
 
-Add new paragraphs to __§23.7.7 [variant.visit]__ of [@N4687]:
+The goal of separating keys and values into two arrays is to increase the lookup speed by packing keys together in the cache. However, this might have detrimental consequences for sort.
 
-> ```diff
-> + template <class R, class Visitor, class... Variants>
-> +   constexpr R visit(Visitor&& vis, Variants&&... vars);
-> ```
-> ::: add
->> _Requires_: The expression in the _Effects_: element shall be
->> a valid expression for all combinations of alternative types
->> of all variants.  Otherwise, the program is ill-formed.
->>
->> _Effects_: Let `is...` be `vars.index()...`. Returns
->> _`INVOKE`_`<R>(forward<Visitor>(vis), get<is>(forward<Variants>(vars))...);`.
->>
->> _Throws_: `bad_variant_access` if any `variant` in `vars` is
->> `valueless_by_exception()`.
->>
->> _Complexity_: For `sizeof...(Variants) <= 1`, the invocation of the callable
->> object is implemented in constant time, i.e. it does not depend on
->> `sizeof...(Types)`. For `sizeof...(Variants) > 1`, the invocation of
->> the callable object has no complexity requirements.
-> :::
+Sort is absolutely crucial for flat containers - for example most of the time spent in Chromium on every key-stroke is flat_set construction [@CHROMIUM_EXAMPLE].
 
-# Design Decisions
+However, at least with `ranges::zip` (which is the only known example of two-container sort), it brings a significant overhead [@QUICKBENCH_SORT].
+At this point the author does not know whether this is due to the quality of an implementation, benchmarking artefact or a fundamental problem.
 
-There is a corner case for which the new overload could clash with the existing
-overload. A call to `std::visit<Result>` actually performs overload resolution
-with the following two candidates:
+# How is pair of references different from `ref`/`span`/`string_view`.
 
-```cpp
-template <class Visitor, class... Variants>
-constexpr decltype(auto) visit(Visitor&&, Variants&&...);
+It might be important to clarify why such "reference like types" as span and string_view do not cause a problem while pair of references does. They actually can cause similar issues, which was the case in multi-span - if we try to return a reference to a line/column as an object that does not actually exist. The problem occurs when we break iterator/range/container concepts and not with the non-owning type itself.
 
-template <class R, class Visitor, class... Variants>
-constexpr R visit(Visitor&&, Variants&&...);
-```
+# Proposed actions
 
-The template instantiation via `std::visit<Result>` replaces `Visitor` with
-`Result` for the first overload, `R` with `Result` for the second, and
-we end up with the following:
-
-```cpp
-template <class... Variants>
-constexpr decltype(auto) visit(Result&&, Variants&&...);
-
-template <class Visitor, class... Variants>
-constexpr Result visit(Visitor&&, Variants&&...);
-```
-
-This results in an ambiguity if `Result&&` happens to be the same type as
-`Visitor&&`. For example, a call to `std::visit<Vis>(Vis{});` would be
-ambiguous since `Result&&` and `Visitor&&` are both `Vis&&`.
-
-In general, we would first need a self-returning visitor, then an invocation
-to `std::visit` with the same type __and__ value category specified for
-the return type __and__ the visitor argument.
-
-We claim that this problem is not worth solving considering the rarity of
-such a use case and the complexity of a potential solution.
-
-Finally, note that this is not a new problem since `bind` already uses
-the same pattern to support `bind<R>`:
-
-```cpp
-  template <class F, class... BoundArgs>
-    @_unspecified_@ bind(F&&, BoundArgs&&...);
-  template <class R, class F, class... BoundArgs>
-    @_unspecified_@ bind(F&&, BoundArgs&&...);
-```
-
-# Implementation Experience
-
-  - [`MPark.Variant`][mpark/variant] implements `visit<R>` as proposed in
-    the [`visit-r`][visit-r] branch.
-  - [`Eggs.Variant`][eggs/variant] has provided an implementation of `visit<R>`
-    as `apply<R>` since 2014, and also handles the corner case mentioned in
-    [Design Decisions](#design-decisions).
-
-[visit-r]: https://github.com/mpark/variant/tree/visit-r
-[mpark/variant]: https://github.com/mpark/variant
-[eggs/variant]: https://github.com/eggs-cpp/variant
-
-# Future Work
-
-There are other similar facilities that currently use _`INVOKE`_, and
-do not provide an accompanying overload that uses _`INVOKE`_`<R>`.
-Some examples are `std::invoke`, `std::apply`, and `std::async`.
-
-There may be room for a paper with clear guidelines as to
-if/when such facilities should have an accompanying overload.
+This paper suggest to postpone `flat_map` at least until the standardization of `zip`. If with `zip` the standard committee decides that proxy references are an acceptable practice in C++ than `flat_map` can use them too and the C++ community will have to learn to be extremely cautious in a much bigger number of use-cases than now. But this should be a considered decision and not something done on the back of `flat_map`.
+Ideally would be to find a better solution for proxy references that is intuitive and unintrusive. And then use that for `flat_map`.
 
 ---
 references:
-  - id: N4687
-    citation-label: N4687
-    title: "Working Draft, Standard for Programming Language C++"
+  - id: P0429
+    citation-label: P0429
+    title: "A Standard `flat_map`"
+    author:
+      - family: Laine
+        given: Zach
     issued:
-      year: 2017
-    URL: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/n4687.pdf
+      year: 2019
+    URL: https://wg21.link/p0429
+  - id: P0009
+    citation-label: P0009
+    title: "Polymorphic Multidimensional Array Reference"
+    issued:
+      year: 2019
+    URL: https://wg21.link/p0009
+  - id: P1386
+    citation-label: P1386
+    title: "A Standard Audio API for C++: Motivation, Scope, and Basic Design"
+    issued:
+      year: 2019
+    URL: https://wg21.link/p1386
+  - id: CHROMIUM_EXAMPLE
+    citation-label: CHROMIUM_EXAMPLE
+    title: "Example where sort is important in Chromium"
+    URL: https://cs.chromium.org/chromium/src/components/omnibox/browser/url_index_private_data.cc?l=657&rcl=7bfecf258f220ea375ffd376608d6ec71ca9d8ce
+  - id: QUICKBENCH_SORT
+    citation-label: QUICKBENCH_SORT
+    title: "Measuring sort of two containers vs one container"
+    URL: http://quick-bench.com/V7zQvXo5R13DVMvmuRzj9GtoEMM
+  - id: VECTOR_BOOL
+    citation-label: VECTOR_BOOL
+    title: "On `vector<bool>`"
+    author:
+      - family: Hinnant
+        given: Howard
+    issued:
+      year: 2012
+    URL: https://howardhinnant.github.io/onvectorbool.html
 ---
