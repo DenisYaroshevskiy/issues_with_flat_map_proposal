@@ -29,8 +29,8 @@ auto x = std::move(*it);  // `x` is moved from `*it`. Unless it's a `flat_map` w
                           // this creates a reference. Copy does not work either.
 
 //--------------------
-auto& x = *it;  // Create a mutable reference to the value pointed by it. Except for flat_map where this
-                // does not compile.
+auto& x = *it;  // Create a mutable reference to the value pointed by it.
+                // Except for flat_map where this does not compile.
 
 //--------------------
 [x = *it] { do_smth(x); }  // Capture an element by value. Unless flat_map,
@@ -44,8 +44,8 @@ auto foo() {             // This does not dangle unless used with flat_map’s i
 
 //--------------------
 template <typename T>
-void bar(T mine) {        // bar does not modify input parameters. Unless called with flat_map reference.
-  sink(std::move(mine));
+void bar(T mine) {        // bar does not modify input parameters.
+  sink(std::move(mine));  // Unless called with flat_map reference.
 }
 ```
 
