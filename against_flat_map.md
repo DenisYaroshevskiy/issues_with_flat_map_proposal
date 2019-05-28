@@ -16,7 +16,8 @@ Original revision of the paper for 2019 Cologne meeting.
 
 # Introduction
 
-[@P0429] introduces `flat_map` into the standard as a container adaptor based on two containers which requires that reference type to be a proxy object. This has been attempted on multiple occasions for other use-cases such as an infamous `vector<bool>` [@VECTOR_BOOL], multi-span (decided against it) [@P0009], standard audio proposal [@P1386] (also decided against it following multi-span) and others. The goal of this paper is to object to inclusion of `flat_map` with same flawed design into the standard at least until the point that zip is standardized.
+[@P0429] introduces `flat_map` into the standard as a container adaptor based on two containers which requires that reference type to be a proxy object. This has been attempted on multiple occasions for other use-cases such as an infamous `vector<bool>` [@VECTOR_BOOL], multi-span (decided against it) [@P0009], standard audio proposal [@P1386] (also decided against it following multi-span) and others.
+From the last revision of the ranges proposal [@P1035R4] the standard comittee removed `zip_view` - a general purpose view to iterate over multiple containers - which is a more general solution to what `flat_map` needs to do for iteration. The goal of this paper is to object to inclusion of `flat_map` with a knowingly flawed design into the standard at least until `zip_view` [@P1035R4], because `zip_view` would be a decision point: how should proxy references be implemented and what is an acceptable level of comlexity for them.
 
 # Listing of examples of how current design is problematic
 
@@ -45,7 +46,7 @@ auto foo() {             // This does not dangle unless used with flat_map’s i
 //--------------------
 template <typename T>
 void bar(T mine) {        // bar does not modify input parameters.
-  sink(std::move(mine));  // Unless called with flat_map reference.
+  sink(std::move(mine));  // Unless called with a flat_map reference.
 }
 ```
 
@@ -54,12 +55,12 @@ void bar(T mine) {        // bar does not modify input parameters.
 There is no production (or even a complete reference) implementation for `flat_map` that is based on two containers that the author could find.
 All popular open source implementations (boost, folly, eastl, chromium) use a single container.
 The only library that we are aware of that could provide a similar experience to using two containers flat map is `zip` utility from ranges-v3.
-`zip` was not yet accepted for standardisation.
+The proposal to add `zip_view` [@P1035R4] (a version of that utility) was not yet accepted for standardisation.
 
-# Lack of `zip` limits the usage of `flat_map`
+# Lack of `zip_view` limits the usage of `flat_map`
 
-* erase_remove_if idiom is not implementable since there is no zip in the standard. Also current version does not have mutating access to keys/values which also disallows this.
-* One of the most typical use-cases for flat_map is building a buffer and then converting it into a map. Without standard zip we cannot use algorithms to populate such buffers.
+* erase_remove_if idiom is not implementable since there is no `zip_view` in the standard. Also current version does not have mutating access to keys/values which also disallows this.
+* One of the most typical use-cases for flat_map is building a buffer and then converting it into a map. Without standard `zip_view` we cannot use algorithms to populate such buffers.
 
 These are very important use-cases and current proposal does not address them.
 
@@ -72,13 +73,25 @@ Sort is absolutely crucial for flat containers - for example most of the time sp
 However, at least with `ranges::zip` (which is the only known example of two-container sort), it brings a significant overhead [@QUICKBENCH_SORT].
 At this point the author does not know whether this is due to the quality of an implementation, benchmarking artefact or a fundamental problem.
 
-# How is pair of references different from `ref`/`span`/`string_view`.
+# How does this relate to std::ref/std::string_view/std::span?
 
-It might be important to clarify why such "reference like types" as span and string_view do not cause a problem while pair of references does. They actually can cause similar issues, which was the case in multi-span - if we try to return a reference to a line/column as an object that does not actually exist. The problem occurs when we break iterator/range/container concepts and not with the non-owning type itself.
+In C++ standard there are a few "reference-like" types that are widely and succesfully used in production. This paper is not against such types it is just against using them as `iterator::reference`. All of the language constructs (such as auto/argument deduction etc) as well as library components (such as algorithms) are expected to work with them as `Semiregular` types and to not perform any conversions.
+Examples:
+
+* It would be unexpected that captured by value `string_view` was converted into `std::string`
+* If the user has a function that returns a `std::span` and result of that would be stored into a local variable with a deduced type that variable should be `std::span` type and not `std::vector`.
+
+On the contrary these exaples not what we expect from `iterator::reference` types that we have now (see listing). If the standard was to inroduce `iterator::reference` that were to behave differently - all of the examples in the listing should be reworked in some different way.
+
+The problem is not a "reference-like" type but an iterator that tries to use it as a `reference`.
+
+# How this relates to "Proxy Iterators for the Ranges Extensions" [@D0022]
+
+Eric Niebler in [@D0022] solved a very important part of the proxy-iterator problem: how proxy-iterators fit into iterator concept and how to design algorithms for them. However that paper does not address type deduction which is also a big part of the problem.
 
 # Proposed actions
 
-This paper suggest to postpone `flat_map` at least until the standardization of `zip`. If with `zip` the standard committee decides that proxy references are an acceptable practice in C++ than `flat_map` can use them too and the C++ community will have to learn to be extremely cautious in a much bigger number of use-cases than now. But this should be a considered decision and not something done on the back of `flat_map`.
+This paper suggests to postpone `flat_map` at least until the standardization of `zip_view`. If with `zip_view` the standard committee decides that proxy references are an acceptable practice in C++ than `flat_map` can use them too and the C++ community will have to learn to be extremely cautious in a much bigger number of use-cases than now. But this should be a considered decision and not something done on the back of `flat_map`.
 Ideally would be to find a better solution for proxy references that is intuitive and unintrusive. And then use that for `flat_map`.
 
 ---
@@ -121,4 +134,15 @@ references:
     issued:
       year: 2012
     URL: https://howardhinnant.github.io/onvectorbool.html
+  - id: D0022
+    citation-label: D0022
+    title: Proxy Iterators for the Ranges Extensions
+    author:
+      - family: Niebler
+        given: Eric
+    URL: https://ericniebler.github.io/std/wg21/D0022.html
+  - id: P1035R4
+    citation-label: P1035R4
+    title: Input range adaptors (revision 4)
+    URL: https://wg21.link/p1035r4
 ---
