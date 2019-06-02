@@ -17,7 +17,7 @@ Original revision of the paper for 2019 Cologne meeting.
 # Introduction
 
 [@P0429] introduces `flat_map` into the standard as a container adaptor based on two containers which requires that reference type to be a proxy object. This has been attempted on multiple occasions for other use-cases such as an infamous `vector<bool>` [@VECTOR_BOOL], multi-span (decided against it) [@P0009], standard audio proposal [@P1386] (also decided against it following multi-span) and others.
-From the last revision of the ranges proposal [@P1035R4] the standard comittee removed `zip_view` - a general purpose view to iterate over multiple containers - which is a more general solution to what `flat_map` needs to do for iteration. The goal of this paper is to object to inclusion of `flat_map` with a knowingly flawed design into the standard at least until `zip_view` [@P1035R4], because `zip_view` would be a decision point: how should proxy references be implemented and what is an acceptable level of comlexity for them.
+From the last revision of the ranges proposal [@P1035R4] the standard committee removed `zip_view` - a general purpose view to iterate over multiple containers - which is a more general solution to what `flat_map` needs to do for iteration. The goal of this paper is to object to inclusion of `flat_map` with a knowingly flawed design into the standard at least until `zip_view` [@P1035R4], because `zip_view` would be a decision point: how should proxy references be implemented and what is an acceptable level of complexity for them.
 
 # Listing of examples of how current design is problematic
 
@@ -55,7 +55,7 @@ void bar(T mine) {        // bar does not modify input parameters.
 There is no production (or even a complete reference) implementation for `flat_map` that is based on two containers that the author could find.
 All popular open source implementations (boost, folly, eastl, chromium) use a single container.
 The only library that we are aware of that could provide a similar experience to using two containers flat map is `zip` utility from ranges-v3.
-The proposal to add `zip_view` [@P1035R4] (a version of that utility) was not yet accepted for standardisation.
+The proposal to add `zip_view` [@P1035R4] (a version of that utility) was not yet accepted for standardization.
 
 # Lack of `zip_view` limits the usage of `flat_map`
 
@@ -71,17 +71,17 @@ The goal of separating keys and values into two arrays is to increase the lookup
 Sort is absolutely crucial for flat containers - for example most of the time spent in Chromium on every key-stroke is flat_set construction [@CHROMIUM_EXAMPLE].
 
 However, at least with `ranges::zip` (which is the only known example of two-container sort), it brings a significant overhead [@QUICKBENCH_SORT].
-At this point the author does not know whether this is due to the quality of an implementation, benchmarking artefact or a fundamental problem.
+At this point the author does not know whether this is due to the quality of an implementation, benchmarking artifact or a fundamental problem.
 
 # How does this relate to std::ref/std::string_view/std::span?
 
-In C++ standard there are a few "reference-like" types that are widely and succesfully used in production. This paper is not against such types it is just against using them as `iterator::reference`. All of the language constructs (such as auto/argument deduction etc) as well as library components (such as algorithms) are expected to work with them as `Semiregular` types and to not perform any conversions.
+In C++ standard there are a few "reference-like" types that are widely and successfully used in production. This paper is not against such types it is just against using them as `iterator::reference`. All of the language constructs (such as auto/argument deduction etc) as well as library components (such as algorithms) are expected to work with them as `Semiregular` types and to not perform any conversions.
 Examples:
 
 * It would be unexpected that captured by value `string_view` was converted into `std::string`
 * If the user has a function that returns a `std::span` and result of that would be stored into a local variable with a deduced type that variable should be `std::span` type and not `std::vector`.
 
-On the contrary these exaples not what we expect from `iterator::reference` types that we have now (see listing). If the standard was to inroduce `iterator::reference` that were to behave differently - all of the examples in the listing should be reworked in some different way.
+On the contrary these examples not what we expect from `iterator::reference` types that we have now (see listing). If the standard was to inroduce `iterator::reference` that were to behave differently - all of the examples in the listing should be reworked in some different way.
 
 The problem is not a "reference-like" type but an iterator that tries to use it as a `reference`.
 
