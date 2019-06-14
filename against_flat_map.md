@@ -1,6 +1,6 @@
 ---
 title: "Issues with current `flat_map` proposal"
-document:
+document: P1727R0
 date: 2019-05-20
 audience: Library Working Group
 author:
